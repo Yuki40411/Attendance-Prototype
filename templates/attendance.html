@@ -1,49 +1,76 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="card shadow-sm border-0">
+<a href="/" class="btn btn-link"><--- Back to Home</a><br>
+<div class="card shadow-sm border-0 mt-4">
     <div class="card-header bg-white pt-4 pb-3">
-        <h3>Mark Class Attendance</h3>
+        <h3 class="mb-0 text-primary">Mark Class Attendance</h3>
     </div>
     <div class="card-body">
-        <a href="/"><-- Back to Home</a><br><br>
-        <form method="post">
-            <div class="mb-4 row">
-                <label for="date" class="col-sm-2 col-form-label fw-bold">Class Date:</label>
-                <div class="col-sm-4">
-                    <input type="date" name="date" class="form-control" required>
+        
+        <form method="get" class="mb-4">
+            <div class="row align-items-center">
+                <div class="col-auto">
+                    <label class="col-form-label fw-bold">Select Subject:</label>
+                </div>
+                <div class="col-auto">
+                    <select name="class_id" class="form-select" onchange="this.form.submit()">
+                        <option value="">-- Choose a class --</option>
+                        {% for c in classes %}
+                            <option value="{{ c['id'] }}" {% if selected_class_id|string == c['id']|string %}selected{% endif %}>
+                                {{ c['name'] }}
+                            </option>
+                        {% endfor %}
+                    </select>
                 </div>
             </div>
-            
-            <table class="table table-hover table-bordered align-middle">
-                <thead class="table-light">
-                    <tr>
-                        <th>Student ID</th>
-                        <th>Name</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for student in students %}
-                    <tr>
-                        <td>{{ student['student_id'] }}</td>
-                        <td class="fw-bold">{{ student['name'] }}</td>
-                        <td>
-                            <select name="{{ student['student_id'] }}" class="form-select w-50">
-                                <option value="Present">Present</option>
-                                <option value="Absent">Absent</option>
-                                <option value="Late">Late</option>
-                            </select>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            
-            <div class="mt-4 text-end">
-                <button type="submit" class="btn btn-success btn-lg px-5">Submit Attendance</button>
-            </div>
         </form>
+
+        <hr>
+
+        {% if selected_class_id and students %}
+            <form method="post" action="/attendance">
+                <input type="hidden" name="class_id" value="{{ selected_class_id }}">
+                
+                <div class="mb-4 row mt-4">
+                    <label for="date" class="col-sm-2 col-form-label fw-bold">Class Date:</label>
+                    <div class="col-sm-4">
+                        <input type="date" name="date" class="form-control" required>
+                    </div>
+                </div>
+                
+                <table class="table table-hover table-bordered align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Student ID</th>
+                            <th>Name</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for student in students %}
+                        <tr>
+                            <td>{{ student['student_id'] }}</td>
+                            <td class="fw-bold">{{ student['name'] }}</td>
+                            <td>
+                                <select name="{{ student['student_id'] }}" class="form-select w-50">
+                                    <option value="Present">Present</option>
+                                    <option value="Absent">Absent</option>
+                                    <option value="Late">Late</option>
+                                </select>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                
+                <div class="mt-4 text-end">
+                    <button type="submit" class="btn btn-success btn-lg px-5">Submit Attendance</button>
+                </div>
+            </form>
+        {% elif selected_class_id %}
+            <div class="alert alert-warning mt-4">No students found for this class. Please upload a CSV for this subject first.</div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}
