@@ -4,17 +4,15 @@
 <a href="/" class="btn btn-link"><--- Back to Home</a><br>
 <div class="card shadow-sm border-0 mt-4">
     <div class="card-header bg-white pt-4 pb-3">
-        <h3 class="mb-0 text-primary">Mark Class Attendance</h3>
+        <h3>View & Mark Attendance</h3>
     </div>
     <div class="card-body">
         
-        <form method="get" class="mb-4">
-            <div class="row align-items-center">
-                <div class="col-auto">
-                    <label class="col-form-label fw-bold">Select Subject:</label>
-                </div>
-                <div class="col-auto">
-                    <select name="class_id" class="form-select" onchange="this.form.submit()">
+        <form method="get" class="mb-4 bg-light p-3 rounded border">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">1. Select Subject:</label>
+                    <select name="class_id" class="form-select" required onchange="this.form.submit()">
                         <option value="">-- Choose a class --</option>
                         {% for c in classes %}
                             <option value="{{ c['id'] }}" {% if selected_class_id|string == c['id']|string %}selected{% endif %}>
@@ -22,6 +20,11 @@
                             </option>
                         {% endfor %}
                     </select>
+                </div>
+                
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">2. Select Date:</label>
+                    <input type="date" name="date" class="form-control" value="{{ selected_date }}" required onchange="this.form.submit()">
                 </div>
             </div>
         </form>
@@ -31,13 +34,9 @@
         {% if selected_class_id and students %}
             <form method="post" action="/attendance">
                 <input type="hidden" name="class_id" value="{{ selected_class_id }}">
+                <input type="hidden" name="date" value="{{ selected_date }}">
                 
-                <div class="mb-4 row mt-4">
-                    <label for="date" class="col-sm-2 col-form-label fw-bold">Class Date:</label>
-                    <div class="col-sm-4">
-                        <input type="date" name="date" class="form-control" required>
-                    </div>
-                </div>
+                <h5 class="mb-3">Attendance Roster for: <span class="badge bg-secondary">{{ selected_date }}</span></h5>
                 
                 <table class="table table-hover table-bordered align-middle">
                     <thead class="table-light">
@@ -54,9 +53,9 @@
                             <td class="fw-bold">{{ student['name'] }}</td>
                             <td>
                                 <select name="{{ student['student_id'] }}" class="form-select w-50">
-                                    <option value="Present">Present</option>
-                                    <option value="Absent">Absent</option>
-                                    <option value="Late">Late</option>
+                                    <option value="Present" {% if student['status'] == 'Present' or not student['status'] %}selected{% endif %}>Present</option>
+                                    <option value="Absent" {% if student['status'] == 'Absent' %}selected{% endif %}>Absent</option>
+                                    <option value="Late" {% if student['status'] == 'Late' %}selected{% endif %}>Late</option>
                                 </select>
                             </td>
                         </tr>
@@ -65,7 +64,7 @@
                 </table>
                 
                 <div class="mt-4 text-end">
-                    <button type="submit" class="btn btn-success btn-lg px-5">Submit Attendance</button>
+                    <button type="submit" class="btn btn-success btn-lg px-5">Save Attendance</button>
                 </div>
             </form>
         {% elif selected_class_id %}
