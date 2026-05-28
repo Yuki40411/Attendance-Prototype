@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="p-5 text-center bg-white rounded-3 shadow-sm mt-5">
+    <h2>Upload Student CSV</h2><br>
+        <form method="post" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".csv" required>
+            <button type="submit">Upload</button>
+        </form>
+        <br><a href="/">Back to Home</a>
+</div>
+{% endblock %}

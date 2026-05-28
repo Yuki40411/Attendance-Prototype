@@ -55,14 +55,7 @@ def upload_csv():
             flash('CSV Imported Successfully!')
             return redirect(url_for('take_attendance'))
             
-    return '''
-        <h2>Upload Student CSV</h2>
-        <form method="post" enctype="multipart/form-data">
-            <input type="file" name="file" accept=".csv" required>
-            <button type="submit">Upload</button>
-        </form>
-        <br><a href="/">Back to Home</a>
-    '''
+    return render_template('upload.html')
 
 @app.route('/attendance', methods=['GET', 'POST'])
 def take_attendance():
