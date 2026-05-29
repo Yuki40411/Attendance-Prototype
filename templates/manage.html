@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card shadow-sm border-0 mt-4">
+    <div class="card-header bg-white pt-4 pb-3">
+        <h3 class="mb-0 text-primary">Manage Class Rosters</h3>
+        <p class="text-muted mb-0">Add new students manually, or drop/restore existing students.</p>
+    </div>
+    <div class="card-body">
+        
+        <form method="get" class="mb-4 bg-light p-3 rounded border">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <label class="form-label fw-bold">Select Subject to Manage:</label>
+                    <select name="class_id" class="form-select" required onchange="this.form.submit()">
+                        <option value="">-- Choose a class --</option>
+                        {% for c in classes %}
+                            <option value="{{ c['id'] }}" {% if selected_class_id|string == c['id']|string %}selected{% endif %}>
+                                {{ c['name'] }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </form>
+
+        <hr>
+
+        {% if selected_class_id %}
+            
+            <div class="card mb-4 bg-light border-0">
+                <div class="card-body">
+                    <h5 class="card-title text-success mb-3">Enroll a Single Student</h5>
+                    <form method="post" action="/manage" class="row g-3 align-items-end">
+                        <input type="hidden" name="class_id" value="{{ selected_class_id }}">
+                        <input type="hidden" name="action" value="add">
+                        
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold">Student ID</label>
+                            <input type="text" name="new_student_id" class="form-control" placeholder="e.g. 1008" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Full Name</label>
+                            <input type="text" name="new_student_name" class="form-control" placeholder="e.g. Ali Bin Abu" required>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="submit" class="btn btn-success w-100">Add to Roster</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            {% if students %}
+                <h5 class="mb-3">Current Roster</h5>
+                <table class="table table-hover table-bordered align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Student ID</th>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for student in students %}
+                        <tr class="{% if student['is_active'] == 0 %}table-secondary text-muted{% endif %}">
+                            <td>{{ student['student_id'] }}</td>
+                            <td class="fw-bold">{{ student['name'] }}</td>
+                            <td>
+                                {% if student['is_active'] == 1 %}
+                                    <span class="badge bg-success">Active</span>
+                                {% else %}
+                                    <span class="badge bg-danger">Dropped</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <form method="post" action="/manage" class="m-0">
+                                    <input type="hidden" name="student_id" value="{{ student['student_id'] }}">
+                                    <input type="hidden" name="class_id" value="{{ selected_class_id }}">
+                                    
+                                    {% if student['is_active'] == 1 %}
+                                        <input type="hidden" name="action" value="drop">
+                                        <button type="submit" class="btn btn-outline-danger btn-sm">Drop</button>
+                                    {% else %}
+                                        <input type="hidden" name="action" value="restore">
+                                        <button type="submit" class="btn btn-outline-success btn-sm">Restore</button>
+                                    {% endif %}
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div class="alert alert-warning mt-4">No students found for this class. Try adding one above!</div>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
