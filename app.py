@@ -1,8 +1,10 @@
 import sqlite3
 import csv
 import io
+import random
 from datetime import date
-from flask import Flask, request, render_template, redirect, url_for, flash
+from functools import wraps # NEW: Used to create security locks
+from flask import Flask, request, render_template, redirect, url_for, flash, session
 
 app = Flask(__name__)
 app.secret_key = 'super_secret_poc_key' 
@@ -13,50 +15,121 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# --- SECURITY DECORATORS ---
+def lecturer_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('role') != 'lecturer':
+            flash("Access denied. Lecturer login required.", "danger")
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def student_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('role') != 'student':
+            flash("Please log in as a student to access the check-in portal.", "warning")
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# --- INITIALIZATION ---
 def init_db():
     with get_db_connection() as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS classes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS students (
-                student_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL
-            )
-        ''')
-        # UPDATED: Added is_active for Soft Deletes (1 = Active, 0 = Dropped)
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS enrollments (
-                student_id TEXT,
-                class_id INTEGER,
-                is_active INTEGER DEFAULT 1, 
-                PRIMARY KEY (student_id, class_id),
-                FOREIGN KEY(student_id) REFERENCES students(student_id),
-                FOREIGN KEY(class_id) REFERENCES classes(id)
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS attendance (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id TEXT,
-                class_id INTEGER,
-                date TEXT,
-                status TEXT,
-                UNIQUE(student_id, class_id, date), 
-                FOREIGN KEY(student_id) REFERENCES students(student_id),
-                FOREIGN KEY(class_id) REFERENCES classes(id)
-            )
-        ''')
+        conn.execute('CREATE TABLE IF NOT EXISTS classes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS students (student_id TEXT PRIMARY KEY, name TEXT NOT NULL)')
+        conn.execute('''CREATE TABLE IF NOT EXISTS enrollments (
+            student_id TEXT, class_id INTEGER, is_active INTEGER DEFAULT 1, 
+            PRIMARY KEY (student_id, class_id), FOREIGN KEY(student_id) REFERENCES students(student_id), FOREIGN KEY(class_id) REFERENCES classes(id))''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS attendance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, student_id TEXT, class_id INTEGER, date TEXT, status TEXT,
+            UNIQUE(student_id, class_id, date), FOREIGN KEY(student_id) REFERENCES students(student_id), FOREIGN KEY(class_id) REFERENCES classes(id))''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS active_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, class_id INTEGER, date TEXT, pin TEXT,
+            UNIQUE(class_id, date), FOREIGN KEY(class_id) REFERENCES classes(id))''')
         conn.commit()
 
-@app.route('/', methods=['GET'])
+# --- AUTHENTICATION ROUTES ---
+@app.route('/')
 def index():
-    return render_template('index.html')
+    # Smart routing based on who is logged in
+    if session.get('role') == 'lecturer':
+        return redirect(url_for('take_attendance'))
+    elif session.get('role') == 'student':
+        return redirect(url_for('student_checkin'))
+    return redirect(url_for('login'))
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        role = request.form.get('role')
+        
+        if role == 'lecturer':
+            session.clear()
+            session['role'] = 'lecturer'
+            flash("Welcome back, Lecturer!", "success")
+            return redirect(url_for('take_attendance'))
+                
+        elif role == 'student':
+            student_id = request.form.get('student_id').strip()
+            with get_db_connection() as conn:
+                student = conn.execute('SELECT * FROM students WHERE student_id = ?', (student_id,)).fetchone()
+                if student:
+                    session.clear()
+                    session['role'] = 'student'
+                    session['student_id'] = student_id
+                    session['student_name'] = student['name']
+                    flash(f"Welcome, {student['name']}!", "success")
+                    return redirect(url_for('student_checkin'))
+                else:
+                    flash("Student ID not found in the system. Please see your lecturer.", "danger")
+                    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash("You have been successfully logged out.", "info")
+    return redirect(url_for('login'))
+
+# --- STUDENT ROUTE ---
+@app.route('/checkin', methods=['GET', 'POST'])
+@student_required # Locked to students
+def student_checkin():
+    if request.method == 'POST':
+        student_id = session.get('student_id') # Pulled securely from session, NOT the form!
+        pin = request.form.get('pin').strip()
+
+        with get_db_connection() as conn:
+            session_data = conn.execute('SELECT class_id, date FROM active_sessions WHERE pin = ?', (pin,)).fetchone()
+
+            if session_data:
+                class_id = session_data['class_id']
+                session_date = session_data['date']
+                enrollment = conn.execute('SELECT is_active FROM enrollments WHERE student_id = ? AND class_id = ?', (student_id, class_id)).fetchone()
+
+                if enrollment and enrollment['is_active'] == 1:
+                    conn.execute('''
+                        INSERT INTO attendance (student_id, class_id, date, status) 
+                        VALUES (?, ?, ?, 'Present')
+                        ON CONFLICT(student_id, class_id, date) 
+                        DO UPDATE SET status='Present'
+                    ''', (student_id, class_id, session_date))
+                    conn.commit()
+                    flash(f"Check-in successful! You have been marked Present.", "success")
+                else:
+                    flash("Check-in Failed: You are not actively enrolled in this class.", "danger")
+            else:
+                flash("Check-in Failed: Invalid or expired PIN.", "danger")
+                
+        return redirect(url_for('student_checkin'))
+
+    return render_template('checkin.html')
+
+# --- LECTURER ROUTES ---
 @app.route('/upload', methods=['GET', 'POST'])
+@lecturer_required
 def upload_csv():
     if request.method == 'POST':
         file = request.files['file']
@@ -106,131 +179,122 @@ def upload_csv():
                             
                         if student_id and student_name: 
                             conn.execute('INSERT OR IGNORE INTO students (student_id, name) VALUES (?, ?)', (student_id, student_name))
-                            
-                            existing_enrollment = conn.execute(
-                                'SELECT is_active FROM enrollments WHERE student_id = ? AND class_id = ?', 
-                                (student_id, class_id)
-                            ).fetchone()
+                            existing_enrollment = conn.execute('SELECT is_active FROM enrollments WHERE student_id = ? AND class_id = ?', (student_id, class_id)).fetchone()
                             
                             if not existing_enrollment:
                                 conn.execute('INSERT INTO enrollments (student_id, class_id) VALUES (?, ?)', (student_id, class_id))
                                 new_enrollments += 1
                             elif existing_enrollment['is_active'] == 0:
-                                # Re-activate a dropped student if they are uploaded again
                                 conn.execute('UPDATE enrollments SET is_active = 1 WHERE student_id = ? AND class_id = ?', (student_id, class_id))
                                 new_enrollments += 1
                 
                 if new_enrollments == 0 and not is_update:
                     conn.rollback() 
-                    flash(f'Error: Could not read any valid students from CSV. Check the file format.', 'danger')
-                    return redirect(url_for('upload_csv'))
+                    flash('Error: Could not read any valid students from CSV. Check the file format.', 'danger')
                 else:
                     conn.commit() 
                     if is_update:
-                        if new_enrollments == 0:
-                            flash(f'No new transfer students found. The roster for "{class_name}" is already up to date!', 'info')
-                        else:
-                            flash(f'Success! Added/Restored {new_enrollments} student(s) to "{class_name}".', 'success')
-                    else:
-                        flash(f'Success! Created "{class_name}" and enrolled {new_enrollments} students.', 'success')
+                        if new_enrollments == 0: flash(f'No new transfer students found. The roster for "{class_name}" is already up to date!', 'info')
+                        else: flash(f'Success! Added/Restored {new_enrollments} student(s) to "{class_name}".', 'success')
+                    else: flash(f'Success! Created "{class_name}" and enrolled {new_enrollments} students.', 'success')
                         
-            
+        return redirect(url_for('take_attendance'))
     return render_template('upload.html')
 
 @app.route('/attendance', methods=['GET', 'POST'])
+@lecturer_required
 def take_attendance():
     if request.method == 'POST':
         form_date = request.form.get('date')
         class_id = request.form.get('class_id')
-        
-        with get_db_connection() as conn:
-            for key, value in request.form.items():
-                if key not in ('date', 'class_id'):
-                    conn.execute('''
-                        INSERT INTO attendance (student_id, class_id, date, status) 
-                        VALUES (?, ?, ?, ?)
-                        ON CONFLICT(student_id, class_id, date) 
-                        DO UPDATE SET status=excluded.status
-                    ''', (key, class_id, form_date, value))
-            conn.commit()
-        flash(f"Attendance for {form_date} saved/updated successfully!", 'success')
-        return redirect(url_for('take_attendance', class_id=class_id, date=form_date))
+        action = request.form.get('action')
 
+        with get_db_connection() as conn:
+            # ACTION 1: Generate Student PIN
+            if action == 'generate_pin':
+                new_pin = str(random.randint(1000, 9999))
+                conn.execute('INSERT INTO active_sessions (class_id, date, pin) VALUES (?, ?, ?) ON CONFLICT(class_id, date) DO UPDATE SET pin=excluded.pin', (class_id, form_date, new_pin))
+                conn.commit()
+                flash(f"Session started! Student Check-in PIN is: {new_pin}", "success")
+                return redirect(url_for('take_attendance', class_id=class_id, date=form_date))
+                
+            # ACTION 2: NEW Silent Autosave via AJAX
+            elif action == 'auto_save':
+                student_id = request.form.get('student_id')
+                status = request.form.get('status')
+                
+                conn.execute('''
+                    INSERT INTO attendance (student_id, class_id, date, status) 
+                    VALUES (?, ?, ?, ?) 
+                    ON CONFLICT(student_id, class_id, date) 
+                    DO UPDATE SET status=excluded.status
+                ''', (student_id, class_id, form_date, status))
+                conn.commit()
+                
+                # Return a simple 200 OK text response so the browser doesn't refresh!
+                return "Saved successfully", 200
+
+    # GET Request: Loading the UI
     selected_class_id = request.args.get('class_id')
-    selected_date = request.args.get('date') or date.today().strftime('%Y-%m-%d')
+    today_string = date.today().strftime('%Y-%m-%d')
+    selected_date = request.args.get('date') or today_string
     
     with get_db_connection() as conn:
         classes = conn.execute('SELECT * FROM classes ORDER BY name').fetchall()
         students = []
+        active_pin = None
+        
         if selected_class_id:
-            # UPDATED: Only load active students (is_active = 1) for daily attendance
+            session_data = conn.execute('SELECT pin FROM active_sessions WHERE class_id = ? AND date = ?', (selected_class_id, selected_date)).fetchone()
+            if session_data: active_pin = session_data['pin']
+
             students = conn.execute('''
-                SELECT s.student_id, s.name, a.status
-                FROM students s
+                SELECT s.student_id, s.name, a.status FROM students s
                 JOIN enrollments e ON s.student_id = e.student_id
                 LEFT JOIN attendance a ON s.student_id = a.student_id AND a.class_id = e.class_id AND a.date = ?
-                WHERE e.class_id = ? AND e.is_active = 1
-                ORDER BY s.student_id
+                WHERE e.class_id = ? AND e.is_active = 1 ORDER BY s.student_id
             ''', (selected_date, selected_class_id)).fetchall()
     
-    return render_template('attendance.html', classes=classes, students=students, selected_class_id=selected_class_id, selected_date=selected_date)
+    return render_template('attendance.html', classes=classes, students=students, selected_class_id=selected_class_id, selected_date=selected_date, active_pin=active_pin, today_date=today_string)
 
-# NEW ROUTE: Manage Roster (Drop / Restore / Add Students)
 @app.route('/manage', methods=['GET', 'POST'])
+@lecturer_required
 def manage_roster():
     if request.method == 'POST':
         class_id = request.form.get('class_id')
         action = request.form.get('action') 
         
         with get_db_connection() as conn:
-            # ACTION 1: ADD A NEW STUDENT MANUALLY
             if action == 'add':
                 new_id = request.form.get('new_student_id').strip()
                 new_name = request.form.get('new_student_name').strip()
-                
                 if new_id and new_name:
-                    # 1. Add them to the master student list (ignores if they already exist in another class)
                     conn.execute('INSERT OR IGNORE INTO students (student_id, name) VALUES (?, ?)', (new_id, new_name))
-                    
-                    # 2. Check their status in THIS specific class
                     existing = conn.execute('SELECT is_active FROM enrollments WHERE student_id = ? AND class_id = ?', (new_id, class_id)).fetchone()
-                    
                     if not existing:
                         conn.execute('INSERT INTO enrollments (student_id, class_id) VALUES (?, ?)', (new_id, class_id))
                         flash(f"Success! {new_name} ({new_id}) was added to the class.", "success")
                     elif existing['is_active'] == 0:
                         conn.execute('UPDATE enrollments SET is_active = 1 WHERE student_id = ? AND class_id = ?', (new_id, class_id))
                         flash(f"{new_name} was previously dropped from this class and has been restored.", "success")
-                    elif existing['is_active'] == 1 and new_name != conn.execute('SELECT name FROM students WHERE student_id = ?', (new_id,)).fetchone()['name']:
-                        flash(f"The student ID {new_id} is already in the class with a different name.", "info")
                     else:
-                        flash(f"{new_name} ({new_id}) is already an active student in this class.", "info")
-            
-            # ACTION 2: DROP OR RESTORE EXISTING STUDENTS
+                        flash(f"{new_name} is already active in this class!", "info")
             elif action in ['drop', 'restore']:
                 student_id = request.form.get('student_id')
                 new_status = 0 if action == 'drop' else 1
                 conn.execute('UPDATE enrollments SET is_active = ? WHERE student_id = ? AND class_id = ?', (new_status, student_id, class_id))
                 action_text = "dropped from" if new_status == 0 else "restored to"
                 flash(f"Student {student_id} successfully {action_text} the roster.", "success")
-                
             conn.commit()
             
         return redirect(url_for('manage_roster', class_id=class_id))
 
-    # GET Request: Load the UI
     selected_class_id = request.args.get('class_id')
     with get_db_connection() as conn:
         classes = conn.execute('SELECT * FROM classes ORDER BY name').fetchall()
         students = []
         if selected_class_id:
-            students = conn.execute('''
-                SELECT s.student_id, s.name, e.is_active
-                FROM students s
-                JOIN enrollments e ON s.student_id = e.student_id
-                WHERE e.class_id = ?
-                ORDER BY s.name
-            ''', (selected_class_id,)).fetchall()
+            students = conn.execute('''SELECT s.student_id, s.name, e.is_active FROM students s JOIN enrollments e ON s.student_id = e.student_id WHERE e.class_id = ? ORDER BY s.name''', (selected_class_id,)).fetchall()
 
     return render_template('manage.html', classes=classes, students=students, selected_class_id=selected_class_id)
 
