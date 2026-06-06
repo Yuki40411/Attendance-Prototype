@@ -23,14 +23,14 @@
                 
                 <div class="col-md-6">
                     <label class="form-label fw-bold">2. Select Date:</label>
-                    <input type="text" id="dateSelector" name="date" class="form-control bg-white" placeholder="Select Date..." required>
+                    <input type="text" id="dateSelector" name="date" class="form-control bg-white" placeholder="Select Date..." value="{{ selected_date or '' }}" required>
                 </div> 
             </div> 
         </form>
 
         <hr>
 
-        {% if selected_class_id and students %}
+        {% if selected_class_id and selected_date %}
             
             <div class="mb-4 p-4 rounded text-center {% if active_pin %}bg-success-subtle border border-success{% else %}bg-light border{% endif %}">
                 {% if active_pin %}
@@ -51,46 +51,51 @@
                 {% endif %}
             </div>
 
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="mb-0">Manual Override Roster</h5>
-                <span id="saveStatus" class="badge bg-success" style="opacity: 0; transition: opacity 0.3s;">✓ Saved</span>
-            </div>
-            
-            <table class="table table-hover table-bordered align-middle">
-                <thead class="table-light">
-                    <tr>
-                        <th>Student ID</th>
-                        <th>Name</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for student in students %}
-                    <tr>
-                        <td>{{ student['student_id'] }}</td>
-                        <td class="fw-bold">{{ student['name'] }}</td>
-                        <td>
-                            <select class="form-select w-50" onchange="autoSave(`{{ student['student_id'] }}`, this.value)">
-                                <option value="Present" {% if student['status'] == 'Present' %}selected{% endif %}>Present</option>
-                                <option value="Absent" {% if student['status'] == 'Absent' or not student['status'] %}selected{% endif %}>Absent</option>
-                                <option value="Late" {% if student['status'] == 'Late' %}selected{% endif %}>Late</option>
-                            </select>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            {% if students %}
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="mb-0">Manual Override Roster</h5>
+                    <span id="saveStatus" class="badge bg-success" style="opacity: 0; transition: opacity 0.3s;">✓ Saved</span>
+                </div>
+                
+                <table class="table table-hover table-bordered align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Student ID</th>
+                            <th>Name</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for student in students %}
+                        <tr>
+                            <td>{{ student['student_id'] }}</td>
+                            <td class="fw-bold">{{ student['name'] }}</td>
+                            <td>
+                                <select class="form-select w-50" onchange="autoSave(`{{ student['student_id'] }}`, this.value)">
+                                    <option value="Present" {% if student['status'] == 'Present' %}selected{% endif %}>Present</option>
+                                    <option value="Absent" {% if student['status'] == 'Absent' or not student['status'] %}selected{% endif %}>Absent</option>
+                                    <option value="Late" {% if student['status'] == 'Late' %}selected{% endif %}>Late</option>
+                                </select>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div class="alert alert-warning mt-4">No students found for this class. Please upload a CSV for this subject first.</div>
+            {% endif %}
 
         {% elif selected_class_id %}
-            <div class="alert alert-warning mt-4">No students found for this class. Please upload a CSV for this subject first.</div>
+            <div class="alert alert-info mt-4">
+                <strong><i class="bi bi-info-circle"></i> Please select a date above</strong> to view the roster or generate a Check-in PIN.
+            </div>
         {% endif %}
     </div>
 </div>
 
 <script>
-    // Initialize the Flatpickr calendar on our input box
     flatpickr("#dateSelector", {
-        defaultDate: "{{ selected_date if selected_date else today_date }}",
+        defaultDate: "{{ selected_date or '' }}", 
         maxDate: "today", 
         disable: [
             function(date) {
@@ -102,9 +107,7 @@
         }
     });
 
-    // NEW: The AJAX function that silently saves the attendance
     function autoSave(studentId, status) {
-        // Create the data payload
         let formData = new FormData();
         formData.append('action', 'auto_save');
         formData.append('class_id', '{{ selected_class_id }}');
@@ -112,18 +115,16 @@
         formData.append('student_id', studentId);
         formData.append('status', status);
 
-        // Send it to the backend silently
         fetch('/attendance', {
             method: 'POST',
             body: formData
         }).then(response => {
             if(response.ok) {
-                // Briefly flash the "✓ Saved" badge at the top of the roster so the user knows it worked
                 let statusBadge = document.getElementById('saveStatus');
                 statusBadge.style.opacity = "1";
                 setTimeout(() => {
                     statusBadge.style.opacity = "0";
-                }, 1500); // Fades away after 1.5 seconds
+                }, 1500);
             }
         }).catch(error => {
             alert("Error saving attendance! Check your connection.");

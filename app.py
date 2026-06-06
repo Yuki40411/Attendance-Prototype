@@ -209,8 +209,12 @@ def take_attendance():
         class_id = request.form.get('class_id')
         action = request.form.get('action')
 
+        # BACKEND VALIDATION: Strictly block actions if the date is missing
+        if not form_date:
+            flash("Error: You must select a valid date first!", "danger")
+            return redirect(url_for('take_attendance', class_id=class_id))
+
         with get_db_connection() as conn:
-            # ACTION 1: Generate Student PIN
             if action == 'generate_pin':
                 new_pin = str(random.randint(1000, 9999))
                 conn.execute('INSERT INTO active_sessions (class_id, date, pin) VALUES (?, ?, ?) ON CONFLICT(class_id, date) DO UPDATE SET pin=excluded.pin', (class_id, form_date, new_pin))
@@ -218,11 +222,9 @@ def take_attendance():
                 flash(f"Session started! Student Check-in PIN is: {new_pin}", "success")
                 return redirect(url_for('take_attendance', class_id=class_id, date=form_date))
                 
-            # ACTION 2: NEW Silent Autosave via AJAX
             elif action == 'auto_save':
                 student_id = request.form.get('student_id')
                 status = request.form.get('status')
-                
                 conn.execute('''
                     INSERT INTO attendance (student_id, class_id, date, status) 
                     VALUES (?, ?, ?, ?) 
@@ -230,23 +232,27 @@ def take_attendance():
                     DO UPDATE SET status=excluded.status
                 ''', (student_id, class_id, form_date, status))
                 conn.commit()
-                
-                # Return a simple 200 OK text response so the browser doesn't refresh!
                 return "Saved successfully", 200
 
-    # GET Request: Loading the UI
     selected_class_id = request.args.get('class_id')
+    selected_date = request.args.get('date')
+    
+    # NEW: If the URL sends an empty date, explicitly set it to None so the UI knows it's missing
+    if not selected_date:
+        selected_date = None
+        
     today_string = date.today().strftime('%Y-%m-%d')
-    selected_date = request.args.get('date') or today_string
     
     with get_db_connection() as conn:
         classes = conn.execute('SELECT * FROM classes ORDER BY name').fetchall()
         students = []
         active_pin = None
         
-        if selected_class_id:
+        # NEW: ONLY load the roster and PIN if BOTH a class AND a date are selected
+        if selected_class_id and selected_date:
             session_data = conn.execute('SELECT pin FROM active_sessions WHERE class_id = ? AND date = ?', (selected_class_id, selected_date)).fetchone()
-            if session_data: active_pin = session_data['pin']
+            if session_data: 
+                active_pin = session_data['pin']
 
             students = conn.execute('''
                 SELECT s.student_id, s.name, a.status FROM students s
